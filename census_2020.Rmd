@@ -20,6 +20,13 @@ tracts_weighted <- read.csv("nc_tracts_2010_rc_eth_weighted.csv")
 counties <- read.csv("nc_county_2010_rc_eth.csv")
 places <- read.csv("nc_places_2010_rc_eth.csv")
 
+places <- places %>% 
+  mutate(total = as.double(total), white = as.double(white), black = as.double(black), aian = as.double(aian),
+         asian = as.double(asian), pi = as.double(pi), other = as.double(other), multi = as.double(multi), 
+         hispanic = as.double(hispanic), non_his = as.double(non_his), white_nh = as.double(white_nh),
+         black_nh = as.double(black), aian_nh = as.double(aian_nh), asian_nh = as.double(asian_nh),
+         pi_nh = as.double(pi_nh), other_nh = as.double(other_nh), multi_nh = as.double(multi_nh))
+
 # specify location
 geoheader_path <- "ncgeo2020.pl"
 race_ethnicity_path <- "nc000012020.pl"
@@ -123,7 +130,8 @@ compare_race <- function(table) {
 
 ```{r state-analysis}
 # https://www2.census.gov/programs-surveys/decennial/rdo/about/2020-census-program/Phase3/SupportMaterials/FrequentSummaryLevels.pdf
-race_ethnicity_table("050") %>% 
+# find raw and percent change for each race and total population from 2010 to 2020
+nc_race <- race_ethnicity_table("050") %>% 
   summarize(total = sum(total), hispanic = sum(hispanic), white_nh = sum(white_nh), black_nh = sum(black_nh),
             aian_nh = sum(aian_nh), asian_nh = sum(asian_nh), pi_nh = sum(pi_nh), other_nh = sum(other_nh), 
             multi_nh = sum(multi_nh)) %>% 
@@ -138,15 +146,37 @@ race_ethnicity_table("050") %>%
   group_by(race) %>% 
   mutate(diff = count - lead(count), pct_change = (count / lead(count) - 1) * 100)
 
-race_ethnicity_table("050")
+# find percentage of new residents who are people of color
+nc_race %>% 
+  filter(year == 2020) %>% 
+  select(race, diff) %>% 
+  pivot_wider(names_from = race, values_from = diff) %>% 
+  summarize(poc = (asian_nh + black_nh + hispanic + pi_nh) / total)
+
+# for datawrapper
+county_pct_change <- counties %>% 
+  mutate(year = 2010) %>% 
+  rename(geocode = county_id_2010) %>% 
+  select(year, geocode, total) %>% 
+  rbind(., race_ethnicity_table("050") %>% 
+          mutate(year = 2020) %>% 
+          select(year, geocode, total)) %>% 
+  left_join(geoheader %>% 
+              filter(sumlev == "050") %>% 
+              select(geocode, basename), by = "geocode") %>% 
+  mutate(total = as.double(total), county = basename) %>% 
+  select(year, county, total) %>% 
+  filter(!is.na(county)) %>% 
+  pivot_wider(names_from = year, values_from = total) %>% 
+  mutate(pct_change = (`2020` - `2010`) / `2010` * 100)
 ```
 
-```{r triangle analysis}
+```{r triangle-analysis}
 # Durham FIPS: 37063
 # Orange FIPS: 37135
 # Wake FIPS: 37183
 # Chatham FIPS: 37037
-race_ethnicity_table("050") %>% 
+triangle_race <- race_ethnicity_table("050") %>% 
   filter(geocode %in% c("37037", "37063","37135", "37183")) %>% 
   summarize(total = sum(total), hispanic = sum(hispanic), white_nh = sum(white_nh), black_nh = sum(black_nh),
             aian_nh = sum(aian_nh), asian_nh = sum(asian_nh), pi_nh = sum(pi_nh), other_nh = sum(other_nh), 
@@ -162,9 +192,16 @@ race_ethnicity_table("050") %>%
   arrange(race) %>% 
   group_by(race) %>% 
   mutate(diff = count - lead(count), pct_change = (count / lead(count) - 1) * 100)
+
+# find percentage of total and new residents who are people of color
+triangle_race %>% 
+  filter(race == "total", year == 2020) %>% 
+  rbind(., nc_race %>% 
+          filter(race == "total", year == 2020)) %>% 
+  summarize(count_prop = count / lead(count), diff_prop = diff / lead(diff))
 ```
 
-```{r county analysis}
+```{r county-analysis}
 oc_race <- race_ethnicity_table("050") %>% 
   mutate(year = 2020) %>% 
   filter(geocode == "37135") %>% 
@@ -210,7 +247,7 @@ cc_race <- race_ethnicity_table("050") %>%
 compare_race(cc_race)
 ```
 
-```{r ch analysis}
+```{r ch-analysis}
 # Chapel Hill geocode: 3711800
 # Carrboro geocode: 3710620
 ch_race <- race_ethnicity_table("160") %>% 
@@ -222,9 +259,18 @@ ch_race <- race_ethnicity_table("160") %>%
           select(-sumlev, -logrecno, -place_id_2010, -name) %>% 
           mutate(year = 2010)) %>% 
   select(year, total:multi_nh)
+
+# find percentage of new residents who are people of color
 compare_race(ch_race) %>% 
   filter(year == 2020) %>% 
-  mutate(pct_total = count / 61960 * 100)
+  select(race, diff) %>% 
+  pivot_wider(names_from = race, values_from = diff) %>% 
+  summarize(poc = (asian_nh + black_nh + hispanic + pi_nh) / total)
+
+# find percentage of total residents who are people of color
+ch_race %>% 
+  filter(year == 2020) %>% 
+  summarize(poc = (asian_nh + black_nh + hispanic) / total)
 
 carrboro_race <- race_ethnicity_table("160") %>% 
   filter(geocode == "3710620") %>% 
@@ -239,6 +285,4 @@ compare_race(carrboro_race)
 
 vap_housing_table("050")
 group_quarters_table("050")
-
-1679224/10439388
 ```
